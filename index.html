@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Симулятор лодки 🚤</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body {
+    width:100%; height:100%; overflow:hidden; background:#07202f;
+    font-family:-apple-system,'Segoe UI',Roboto,sans-serif;
+    touch-action:none; user-select:none; -webkit-user-select:none;
+    overscroll-behavior:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+  canvas { display:block; }
+
+  /* ---------- HUD ---------- */
+  #hud {
+    position:fixed; top:14px; left:14px; color:#e8f6ff;
+    background:rgba(6,26,40,.55); border:1px solid rgba(120,200,255,.25);
+    padding:11px 15px; border-radius:14px; font-size:12px;
+    backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+    letter-spacing:.4px; pointer-events:none; min-width:170px;
+  }
+  #hud .row { display:flex; justify-content:space-between; gap:18px; margin:3px 0; }
+  #hud .lbl { color:#8fb4c9; }
+  #hud .val { color:#5fd3ff; font-weight:700; font-variant-numeric:tabular-nums; }
+  #coins { color:#ffd45f; display:inline-block; transition:transform .15s ease, text-shadow .15s ease; }
+  #coins.bump { transform:scale(1.35); text-shadow:0 0 14px #ffd45f; }
+
+  /* ---------- Подсказка для ПК ---------- */
+  #help {
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+    color:#9fc4d8; font-size:12.5px; background:rgba(6,26,40,.5);
+    padding:9px 20px; border-radius:20px; border:1px solid rgba(120,200,255,.15);
+    white-space:nowrap; pointer-events:none;
+  }
+
+  /* ---------- Сенсорное управление ---------- */
+  #touch {
+    position:fixed; inset:0; pointer-events:none; display:none; z-index:10;
+  }
+  @media (pointer:coarse) {
+    #touch { display:block; }
+    #help  { display:none; }
+    #hud   { font-size:11.5px; padding:9px 13px; min-width:150px; }
+  }
+
+  .pad {
+    position:absolute;
+    bottom:calc(18px + env(safe-area-inset-bottom, 0px));
+    display:flex;
+    gap:14px;
+    pointer-events:none;
+  }
+  /* Слева: вперёд (сверху) / назад (снизу) */
+  .pad-left {
+    left:calc(18px + env(safe-area-inset-left, 0px));
+    flex-direction:column;
+    align-items:center;
+  }
+  /* Справа: влево / вправо (в ряд) */
+  .pad-right {
+    right:calc(18px + env(safe-area-inset-right, 0px));
+    flex-direction:row;
+    align-items:center;
+  }
+
+  .tbtn {
+    width:78px; height:78px;
+    border-radius:50%;
+    border:2px solid rgba(120,200,255,.38);
+    background:rgba(10,40,60,.58);
+    color:#bfe9ff;
+    font-size:28px; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+    pointer-events:auto;
+    touch-action:none;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none; -webkit-user-select:none;
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    transition:background .07s ease, transform .07s ease, border-color .07s ease;
+    box-shadow:0 4px 16px rgba(0,10,20,.35);
+  }
+  .tbtn.active {
+    background:rgba(80,180,240,.60);
+    border-color:rgba(180,235,255,.85);
+    transform:scale(.93);
+  }
+  /* Чуть увеличиваем кнопки на очень больших экранах */
+  @media (min-width:820px) and (pointer:coarse) {
+    .tbtn { width:88px; height:88px; font-size:32px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div class="row"><span class="lbl">Скорость</span><span><span class="val" id="spd">0.0</span> <span class="lbl">уз</span></span></div>
+  <div class="row"><span class="lbl">Курс</span><span><span class="val" id="crs">0</span><span class="lbl">°</span></span></div>
+  <div class="row"><span class="lbl">Монеты</span><span class="val" id="coins">0</span></div>
+</div>
+
+<div id="help">W / ↑ — вперёд &nbsp;·&nbsp; S / ↓ — назад &nbsp;·&nbsp; A / D — руль</div>
+
+<div id="touch">
+  <!-- Слева: вперёд / назад -->
+  <div class="pad pad-left">
+    <button class="tbtn" data-k="fwd"  aria-label="Вперёд">▲</button>
+    <button class="tbtn" data-k="back" aria-label="Назад">▼</button>
+  </div>
+  <!-- Справа: влево / вправо -->
+  <div class="pad pad-right">
+    <button class="tbtn" data-k="left"  aria-label="Влево">◀</button>
+    <button class="tbtn" data-k="right" aria-label="Вправо">▶</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================== КАНВАС ============================== */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width  = Math.floor(W * DPR);
+  canvas.height = Math.floor(H * DPR);
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 250));
+resize();
+
+/* ============================== ВВОД ============================== */
+const keys = Object.create(null);
+const touch = { fwd:false, back:false, left:false, right:false };
+
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+/* --- Сенсорные кнопки: мультитач, надёжное нажатие --- */
+document.querySelectorAll('.tbtn').forEach(btn => {
+  const k = btn.dataset.k;
+
+  const press = e => {
+    e.preventDefault();
+    touch[k] = true;
+    btn.classList.add('active');
+    try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+  };
+  const release = e => {
+    e.preventDefault();
+    touch[k] = false;
+    btn.classList.remove('active');
+    try { if (btn.hasPointerCapture?.(e.pointerId)) btn.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+
+  btn.addEventListener('pointerdown', press);
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('lostpointercapture', () => {
+    touch[k] = false;
+    btn.classList.remove('active');
+  });
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+});
+
+/* ============================== СОСТОЯНИЕ ============================== */
+const boat = { x:0, y:0, angle:0, vx:0, vy:0, av:0, speed:0 };
+const cam = { x:0, y:0 };
+const particles     = [];
+const goldParticles = [];
+const floatTexts    = [];
+let wakeAcc = 0;
+let coins = 0;
+let elapsed = 0;
+
+const THRUST  = 420;
+const REVERSE = 210;
+const LINEAR_DRAG = 0.85;
+const START_CLEAR = 520;
+const WORLD_RADIUS = 7200;
+
+const rand = (a, b) => a + Math.random() * (b - a);
+
+/* ============================== ОСТРОВА ============================== */
+const islands = [];
+
+function makeIsland(x, y, r) {
+  const pts = [];
+  const N = 28;
+  const sA = Math.random() * 6.28, sB = Math.random() * 6.28, sC = Math.random() * 6.28;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    const k = 0.80
+      + Math.sin(a * 3 + sA) * 0.10
+      + Math.sin(a * 5 + sB) * 0.07
+      + Math.sin(a * 8 + sC) * 0.04;
+    pts.push({ x: Math.cos(a) * r * k, y: Math.sin(a) * r * k });
+  }
+  const trees = [];
+  const treeCount = Math.round(r / 11);
+  for (let i = 0; i < treeCount; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const d = Math.sqrt(Math.random()) * r * 0.62;
+    trees.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, r: 5 + Math.random() * 6 });
+  }
+  islands.push({ x, y, r, pts, trees });
+}
+
+makeIsland(  780,  -520, 155);
+makeIsland( -900,   620, 215);
+makeIsland(  420,  1150, 135);
+makeIsland( -640,  -820, 185);
+makeIsland( 1650,   430, 165);
+makeIsland(-1550,  -180, 195);
+makeIsland(  150, -1250, 120);
+makeIsland(-1200,  1450, 175);
+
+for (let i = 0; i < 900 && islands.length < 46; i++) {
+  const a = Math.random() * Math.PI * 2;
+  const d = START_CLEAR + Math.pow(Math.random(), 0.75) * (WORLD_RADIUS - START_CLEAR);
+  const x = Math.cos(a) * d;
+  const y = Math.sin(a) * d;
+  const r = rand(80, 235);
+  let ok = true;
+  for (const isl of islands) {
+    if (Math.hypot(isl.x - x, isl.y - y) < isl.r + r + 320) { ok = false; break; }
+  }
+  if (ok) makeIsland(x, y, r);
+}
+
+/* ============================== КОРАБЛИ ============================== */
+const ships = [];
+const SHIP_TYPES = ['fish', 'fish', 'fish', 'sail', 'sail', 'cargo'];
+
+function makeShip(x, y, type) {
+  let radius, speed, driftR;
+  if (type === 'fish')      { radius = 27; speed = 0.06 + Math.random() * 0.07; driftR = 30 + Math.random() * 55; }
+  else if (type === 'sail') { radius = 34; speed = 0.05 + Math.random() * 0.06; driftR = 40 + Math.random() * 70; }
+  else                      { radius = 48; speed = 0.03 + Math.random() * 0.04; driftR = 50 + Math.random() * 80; }
+
+  ships.push({
+    baseX: x, baseY: y, x, y,
+    angle: Math.random() * Math.PI * 2,
+    phase: Math.random() * Math.PI * 2,
+    speed, driftR, radius, type
+  });
+}
+
+for (let i = 0; i < 700 && ships.length < 20; i++) {
+  const a = Math.random() * Math.PI * 2;
+  const d = START_CLEAR + 140 + Math.pow(Math.random(), 0.8) * (WORLD_RADIUS - START_CLEAR);
+  const x = Math.cos(a) * d;
+  const y = Math.sin(a) * d;
+  let ok = true;
+  for (const isl of islands) {
+    if (Math.hypot(isl.x - x, isl.y - y) < isl.r + 270) { ok = false; break; }
+  }
+  if (ok) for (const s of ships) {
+    if (Math.hypot(s.baseX - x, s.baseY - y) < 430) { ok = false; break; }
+  }
+  if (ok) makeShip(x, y, SHIP_TYPES[Math.floor(Math.random() * SHIP_TYPES.length)]);
+}
+
+/* ============================== СУНДУКИ ============================== */
+const chests = [];
+const CHEST_COUNT = 22;
+
+function placeChest(chest) {
+  for (let tries = 0; tries < 260; tries++) {
+    const a = Math.random() * Math.PI * 2;
+    const d = 350 + Math.pow(Math.random(), 0.75) * (WORLD_RADIUS - 350);
+    const x = Math.cos(a) * d;
+    const y = Math.sin(a) * d;
+
+    let ok = true;
+    for (const isl of islands) {
+      if (Math.hypot(isl.x - x, isl.y - y) < isl.r * 0.9 + 130) { ok = false; break; }
+    }
+    if (ok) for (const s of ships) {
+      if (Math.hypot(s.baseX - x, s.baseY - y) < 190) { ok = false; break; }
+    }
+    if (ok) {
+      for (const c of chests) {
+        if (c !== chest && c.active && Math.hypot(c.x - x, c.y - y) < 320) { ok = false; break; }
+      }
+    }
+    if (ok) { chest.x = x; chest.y = y; chest.active = true; return; }
+  }
+  chest.x = 0; chest.y = 0; chest.active = true;
+}
+
+for (let i = 0; i < CHEST_COUNT; i++) {
+  const c = { x: 0, y: 0, active: false, respawnAt: 0, phase: Math.random() * 6.28 };
+  placeChest(c);
+  chests.push(c);
+}
+
+/* ============================== ЧАСТИЦЫ ============================== */
+function spawnCoinBurst(x, y, gain) {
+  for (let i = 0; i < 28; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = 60 + Math.random() * 230;
+    goldParticles.push({
+      x, y,
+      vx: Math.cos(a) * sp,
+      vy: Math.sin(a) * sp - 60,
+      life: 1,
+      size: 2 + Math.random() * 3.5
+    });
+  }
+  floatTexts.push({ x, y: y - 10, text: '+' + gain, life: 1.25, vy: -62 });
+}
+
+/* ============================== ФИЗИКА ============================== */
+function update(dt, t) {
+  const fwd   = (keys['KeyW'] || keys['ArrowUp']    || touch.fwd)   ? 1 : 0;
+  const bwd   = (keys['KeyS'] || keys['ArrowDown']  || touch.back)  ? 1 : 0;
+  const left  = (keys['KeyA'] || keys['ArrowLeft']  || touch.left)  ? 1 : 0;
+  const right = (keys['KeyD'] || keys['ArrowRight'] || touch.right) ? 1 : 0;
+
+  const cos = Math.cos(boat.angle);
+  const sin = Math.sin(boat.angle);
+
+  const thrust = fwd * THRUST - bwd * REVERSE;
+  boat.vx += cos * thrust * dt;
+  boat.vy += sin * thrust * dt;
+
+  const forwardSpeed = boat.vx * cos + boat.vy * sin;
+  const absSpeed = Math.abs(forwardSpeed);
+
+  if (absSpeed > 15) {
+    const steerDir  = right - left;
+    const steerGrip = Math.min(absSpeed / 250, 1);
+    const sign      = Math.sign(forwardSpeed);
+    boat.av += steerDir * sign * steerGrip * 7 * dt;
+  }
+
+  boat.av *= Math.exp(-5 * dt);
+  boat.angle += boat.av * dt;
+
+  const damp = Math.exp(-LINEAR_DRAG * dt);
+  boat.vx *= damp;
+  boat.vy *= damp;
+
+  const rx = -sin, ry = cos;
+  const lateral = boat.vx * rx + boat.vy * ry;
+  const killLat = Math.min(1, 6 * dt);
+  boat.vx -= rx * lateral * killLat;
+  boat.vy -= ry * lateral * killLat;
+
+  boat.x += boat.vx * dt;
+  boat.y += boat.vy * dt;
+  boat.speed = Math.hypot(boat.vx, boat.vy);
+
+  for (const s of ships) {
+    s.phase += s.speed * dt;
+    s.x = s.baseX + Math.cos(s.phase) * s.driftR;
+    s.y = s.baseY + Math.sin(s.phase) * s.driftR;
+    s.angle = s.phase + Math.PI / 2;
+  }
+
+  /* Острова */
+  for (const isl of islands) {
+    const dx = boat.x - isl.x;
+    const dy = boat.y - isl.y;
+    const d  = Math.hypot(dx, dy) || 0.001;
+    const minD = isl.r * 0.78 + 20;
+
+    if (d < minD) {
+      const nx = dx / d, ny = dy / d;
+      boat.x = isl.x + nx * minD;
+      boat.y = isl.y + ny * minD;
+      const vn = boat.vx * nx + boat.vy * ny;
+      if (vn < 0) {
+        boat.vx -= vn * nx * 1.3;
+        boat.vy -= vn * ny * 1.3;
+      }
+      boat.speed = Math.hypot(boat.vx, boat.vy);
+    }
+  }
+
+  /* Корабли */
+  for (const s of ships) {
+    const dx = boat.x - s.x;
+    const dy = boat.y - s.y;
+    const d  = Math.hypot(dx, dy) || 0.001;
+    const minD = s.radius + 24;
+
+    if (d < minD) {
+      const nx = dx / d, ny = dy / d;
+      boat.x = s.x + nx * minD;
+      boat.y = s.y + ny * minD;
+      const vn = boat.vx * nx + boat.vy * ny;
+      if (vn < 0) {
+        boat.vx -= vn * nx * 1.5;
+        boat.vy -= vn * ny * 1.5;
+      }
+      boat.speed = Math.hypot(boat.vx, boat.vy);
+    }
+  }
+
+  /* Сундуки */
+  for (const c of chests) {
+    if (!c.active) {
+      if (t >= c.respawnAt) placeChest(c);
+      continue;
+    }
+    const dx = boat.x - c.x;
+    const dy = boat.y - c.y;
+    if (dx * dx + dy * dy < 56 * 56) {
+      c.active = false;
+      c.respawnAt = t + 16 + Math.random() * 14;
+      const gain = 5 + Math.floor(Math.random() * 21);
+      coins += gain;
+      spawnCoinBurst(c.x, c.y, gain);
+      bumpCoins();
+    }
+  }
+
+  const tx = boat.x + boat.vx * 0.28;
+  const ty = boat.y + boat.vy * 0.28;
+  const k  = 1 - Math.exp(-3.5 * dt);
+  cam.x += (tx - cam.x) * k;
+  cam.y += (ty - cam.y) * k;
+}
+
+/* ============================== СЛЕД ============================== */
+function emitWake(dt) {
+  if (boat.speed < 25) return;
+  wakeAcc += boat.speed * dt * 0.16;
+  const cos = Math.cos(boat.angle), sin = Math.sin(boat.angle);
+
+  while (wakeAcc >= 1) {
+    wakeAcc -= 1;
+    const back = 26;
+    const px = boat.x - cos * back + (Math.random() - 0.5) * 18;
+    const py = boat.y - sin * back + (Math.random() - 0.5) * 18;
+    particles.push({
+      x: px, y: py,
+      vx: (Math.random() - 0.5) * 40 - cos * 18,
+      vy: (Math.random() - 0.5) * 40 - sin * 18,
+      life: 1,
+      size: 3 + Math.random() * 6
+    });
+  }
+  if (particles.length > 750) particles.splice(0, particles.length - 750);
+}
+
+function updateParticles(dt) {
+  const damp = Math.exp(-1.8 * dt);
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= damp;
+    p.vy *= damp;
+    p.size += dt * 26;
+    p.life -= dt * 0.72;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+function updateGoldParticles(dt) {
+  for (let i = goldParticles.length - 1; i >= 0; i--) {
+    const p = goldParticles[i];
+    p.vy += 400 * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= Math.exp(-1.2 * dt);
+    p.life -= dt * 1.45;
+    if (p.life <= 0) goldParticles.splice(i, 1);
+  }
+}
+
+function updateFloatTexts(dt) {
+  for (let i = floatTexts.length - 1; i >= 0; i--) {
+    const f = floatTexts[i];
+    f.y += f.vy * dt;
+    f.vy *= Math.exp(-1.5 * dt);
+    f.life -= dt * 1.1;
+    if (f.life <= 0) floatTexts.splice(i, 1);
+  }
+}
+
+/* ============================== ВОДА ============================== */
+function drawWater(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0,    '#134a6b');
+  g.addColorStop(0.45, '#0d3550');
+  g.addColorStop(1,    '#072238');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  const sun = ctx.createRadialGradient(W * 0.72, H * 0.12, 0, W * 0.72, H * 0.12, Math.max(W, H) * 0.7);
+  sun.addColorStop(0, 'rgba(90,180,230,0.10)');
+  sun.addColorStop(1, 'rgba(90,180,230,0)');
+  ctx.fillStyle = sun;
+  ctx.fillRect(0, 0, W, H);
+
+  const CELL = 74;
+  const offX = -cam.x + W / 2;
+  const offY = -cam.y + H / 2;
+  const startX = Math.floor((cam.x - W / 2) / CELL) * CELL;
+  const startY = Math.floor((cam.y - H / 2) / CELL) * CELL;
+  const endX = cam.x + W / 2 + CELL;
+  const endY = cam.y + H / 2 + CELL;
+
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 2;
+
+  for (let gx = startX; gx < endX; gx += CELL) {
+    for (let gy = startY; gy < endY; gy += CELL) {
+      const ph = Math.sin(gx * 0.008 + gy * 0.012 + t * 1.25);
+      const alpha = 0.05 + 0.15 * (ph * 0.5 + 0.5);
+      const sx = gx + offX + Math.sin(gy * 0.01 + t * 0.7) * 9;
+      const sy = gy + offY + Math.cos(gx * 0.01 + t * 0.9) * 9;
+      const w  = 15 + ph * 6;
+      const h  = 4 + ph * 2.5;
+      ctx.strokeStyle = 'rgba(150,220,255,' + alpha.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.moveTo(sx - w, sy);
+      ctx.quadraticCurveTo(sx, sy - h, sx + w, sy);
+      ctx.stroke();
+    }
+  }
+}
+
+/* ============================== ОСТРОВА ============================== */
+function traceSmooth(pts, scale) {
+  const n = pts.length;
+  ctx.moveTo((pts[0].x + pts[n - 1].x) / 2 * scale, (pts[0].y + pts[n - 1].y) / 2 * scale);
+  for (let i = 0; i < n; i++) {
+    const cur = pts[i];
+    const nxt = pts[(i + 1) % n];
+    ctx.quadraticCurveTo(
+      cur.x * scale, cur.y * scale,
+      (cur.x + nxt.x) / 2 * scale, (cur.y + nxt.y) / 2 * scale
+    );
+  }
+  ctx.closePath();
+}
+
+function drawIslands() {
+  for (const isl of islands) {
+    const sx = isl.x - cam.x + W / 2;
+    const sy = isl.y - cam.y + H / 2;
+    if (sx < -isl.r * 2 - 200 || sx > W + isl.r * 2 + 200 ||
+        sy < -isl.r * 2 - 200 || sy > H + isl.r * 2 + 200) continue;
+
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    ctx.fillStyle = 'rgba(2,20,32,0.35)';
+    ctx.beginPath();
+    ctx.arc(6, 8, isl.r * 1.06, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.beginPath();
+    traceSmooth(isl.pts, 1.16);
+    ctx.fillStyle = '#d9c9a0';
+    ctx.fill();
+
+    ctx.beginPath();
+    traceSmooth(isl.pts, 1.06);
+    ctx.fillStyle = '#6f9a86';
+    ctx.fill();
+
+    const landGrad = ctx.createRadialGradient(-isl.r * 0.25, -isl.r * 0.3, 0, 0, 0, isl.r);
+    landGrad.addColorStop(0, '#4e8a52');
+    landGrad.addColorStop(1, '#2f5f3a');
+    ctx.beginPath();
+    traceSmooth(isl.pts, 1);
+    ctx.fillStyle = landGrad;
+    ctx.fill();
+
+    for (const tr of isl.trees) {
+      ctx.beginPath();
+      ctx.arc(tr.x + 2, tr.y + 3, tr.r, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(10,30,20,0.35)';
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(tr.x, tr.y, tr.r, 0, Math.PI * 2);
+      ctx.fillStyle = '#2a6b3a';
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(tr.x - tr.r * 0.3, tr.y - tr.r * 0.3, tr.r * 0.55, 0, Math.PI * 2);
+      ctx.fillStyle = '#3f8a4c';
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/* ============================== ЧАСТИЦЫ ============================== */
+function drawParticles() {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of particles) {
+    const sx = p.x - cam.x + W / 2;
+    const sy = p.y - cam.y + H / 2;
+    if (sx < -60 || sx > W + 60 || sy < -60 || sy > H + 60) continue;
+    const a = p.life * 0.28;
+    const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, p.size);
+    grad.addColorStop(0, 'rgba(190,235,255,' + a.toFixed(3) + ')');
+    grad.addColorStop(1, 'rgba(120,200,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(sx, sy, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawGoldParticles() {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of goldParticles) {
+    const sx = p.x - cam.x + W / 2;
+    const sy = p.y - cam.y + H / 2;
+    if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) continue;
+    const a = Math.max(0, p.life) * 0.9;
+    ctx.beginPath();
+    ctx.arc(sx, sy, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,220,100,' + a.toFixed(3) + ')';
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawFloatTexts() {
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 19px -apple-system, "Segoe UI", Roboto, sans-serif';
+  for (const f of floatTexts) {
+    const sx = f.x - cam.x + W / 2;
+    const sy = f.y - cam.y + H / 2;
+    ctx.globalAlpha = Math.min(1, f.life * 1.6);
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(40,20,0,0.75)';
+    ctx.strokeText(f.text, sx, sy);
+    ctx.fillStyle = '#ffd45f';
+    ctx.fillText(f.text, sx, sy);
+  }
+  ctx.restore();
+}
+
+/* ============================== СУНДУКИ ============================== */
+function roundRectPath(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawChest(c, t) {
+  if (!c.active) return;
+
+  const sx = c.x - cam.x + W / 2;
+  const sy = c.y - cam.y + H / 2;
+  if (sx < -140 || sx > W + 140 || sy < -140 || sy > H + 140) return;
+
+  const pulse = 0.5 + 0.5 * Math.sin(t * 2.6 + c.phase);
+
+  const gr = 60 + pulse * 16;
+  const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, gr);
+  grad.addColorStop(0,    'rgba(255,220,90,' + (0.30 + pulse * 0.22).toFixed(3) + ')');
+  grad.addColorStop(0.55, 'rgba(255,180,40,0.10)');
+  grad.addColorStop(1,    'rgba(255,150,20,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(sx, sy, gr, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 3; i++) {
+    const a = t * 1.6 + c.phase + i * (Math.PI * 2 / 3);
+    const rr = 27 + Math.sin(t * 3 + i) * 4;
+    const px = sx + Math.cos(a) * rr;
+    const py = sy + Math.sin(a) * rr * 0.6 - 2;
+    ctx.beginPath();
+    ctx.arc(px, py, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,235,150,' + (0.5 + 0.5 * Math.sin(t * 4 + i)).toFixed(2) + ')';
+    ctx.fill();
+  }
+  ctx.restore();
+
+  const bob = Math.sin(t * 2.4 + c.phase) * 2.5;
+  ctx.save();
+  ctx.translate(sx, sy + bob);
+  ctx.rotate(Math.sin(t * 1.3 + c.phase) * 0.05);
+
+  ctx.fillStyle = 'rgba(2,16,24,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(2, 15, 22, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#6b3e17';
+  roundRectPath(-17, -6, 34, 20, 3);
+  ctx.fill();
+
+  ctx.fillStyle = '#8a5220';
+  ctx.beginPath();
+  ctx.moveTo(-17, -6);
+  ctx.quadraticCurveTo(-17, -20, 0, -20);
+  ctx.quadraticCurveTo(17, -20, 17, -6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#4a2a0e';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.strokeStyle = '#ffd45f';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(-17, -6);
+  ctx.lineTo(17, -6);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(-6, -19);
+  ctx.lineTo(-6, 14);
+  ctx.stroke();
+
+  ctx.fillStyle = '#ffd45f';
+  ctx.beginPath();
+  ctx.arc(0, -3, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#5a3a10';
+  ctx.beginPath();
+  ctx.arc(0, -3, 1.8, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+/* ============================== КОРАБЛИ ============================== */
+function drawFishingBoat() {
+  ctx.beginPath();
+  ctx.moveTo(20, 0);
+  ctx.quadraticCurveTo(14, -9, -4, -11);
+  ctx.lineTo(-18, -9);
+  ctx.quadraticCurveTo(-22, 0, -18, 9);
+  ctx.lineTo(-4, 11);
+  ctx.quadraticCurveTo(14, 9, 20, 0);
+  ctx.closePath();
+  ctx.fillStyle = '#e8f0f6';
+  ctx.fill();
+  ctx.strokeStyle = '#4a6a80';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(16, 1);
+  ctx.quadraticCurveTo(0, 9, -16, 8);
+  ctx.strokeStyle = '#3d7fa8';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  ctx.fillStyle = '#dfe8ee';
+  ctx.fillRect(-12, -7, 14, 14);
+  ctx.strokeStyle = '#7d93a5';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-12, -7, 14, 14);
+
+  ctx.fillStyle = '#7fd0f5';
+  ctx.fillRect(-10, -4, 5, 5);
+
+  ctx.strokeStyle = '#8a6a4a';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(6, -8);
+  ctx.lineTo(6, -22);
+  ctx.stroke();
+}
+
+function drawSailboat() {
+  ctx.beginPath();
+  ctx.moveTo(26, 0);
+  ctx.quadraticCurveTo(18, -8, 0, -9);
+  ctx.lineTo(-24, -7);
+  ctx.quadraticCurveTo(-30, 0, -24, 7);
+  ctx.lineTo(0, 9);
+  ctx.quadraticCurveTo(18, 8, 26, 0);
+  ctx.closePath();
+  ctx.fillStyle = '#f4f7fa';
+  ctx.fill();
+  ctx.strokeStyle = '#4a6a80';
+  ctx.lineWidth = 1.4;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(20, 1);
+  ctx.quadraticCurveTo(0, 7, -22, 6);
+  ctx.strokeStyle = '#c9a877';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.strokeStyle = '#6a5038';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(2, -2);
+  ctx.lineTo(2, -34);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(4, -32);
+  ctx.lineTo(4, -6);
+  ctx.lineTo(24, -6);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255,255,255,0.95)';
+  ctx.fill();
+  ctx.strokeStyle = '#aac4d4';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(0, -30);
+  ctx.lineTo(0, -8);
+  ctx.lineTo(-16, -8);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(240,248,255,0.9)';
+  ctx.fill();
+  ctx.strokeStyle = '#aac4d4';
+  ctx.stroke();
+}
+
+function drawCargoShip() {
+  ctx.beginPath();
+  ctx.moveTo(46, 0);
+  ctx.quadraticCurveTo(34, -14, 8, -17);
+  ctx.lineTo(-40, -15);
+  ctx.quadraticCurveTo(-48, 0, -40, 15);
+  ctx.lineTo(8, 17);
+  ctx.quadraticCurveTo(34, 14, 46, 0);
+  ctx.closePath();
+  ctx.fillStyle = '#5a6b78';
+  ctx.fill();
+  ctx.strokeStyle = '#2c3d48';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+
+  ctx.fillStyle = '#8a7a6a';
+  ctx.fillRect(-38, -13, 80, 26);
+
+  const cols = ['#c0503a', '#3a7ac0', '#d0a020', '#3aa060'];
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = cols[i];
+    ctx.fillRect(-32 + i * 15, -10, 12, 8);
+    ctx.fillRect(-32 + i * 15, 2, 12, 8);
+  }
+
+  ctx.fillStyle = '#e9eef2';
+  ctx.fillRect(-40, -8, 10, 16);
+  ctx.strokeStyle = '#7d93a5';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(-40, -8, 10, 16);
+}
+
+function drawShip(s, t) {
+  const sx = s.x - cam.x + W / 2;
+  const sy = s.y - cam.y + H / 2;
+  if (sx < -180 || sx > W + 180 || sy < -180 || sy > H + 180) return;
+
+  const bob = Math.sin(t * 2.2 + s.phase) * 1.8;
+
+  ctx.save();
+  ctx.translate(sx, sy + bob);
+  ctx.rotate(s.angle);
+
+  ctx.save();
+  ctx.globalAlpha = 0.28;
+  ctx.fillStyle = '#021019';
+  ctx.beginPath();
+  ctx.ellipse(-2, 5, s.radius * 1.15, s.radius * 0.55, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  if (s.type === 'fish')      drawFishingBoat();
+  else if (s.type === 'sail') drawSailboat();
+  else                        drawCargoShip();
+
+  ctx.restore();
+}
+
+/* ============================== ЛОДКА ИГРОКА ============================== */
+function drawBoat(t) {
+  const bob = Math.sin(t * 4.2) * 1.6 * (0.4 + Math.min(boat.speed / 400, 0.7));
+  const sway = Math.sin(t * 2.1) * 0.012 + Math.sin(t * 3.6) * 0.008;
+
+  const sx = boat.x - cam.x + W / 2;
+  const sy = boat.y - cam.y + H / 2 + bob;
+
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.rotate(boat.angle + sway);
+
+  ctx.save();
+  ctx.globalAlpha = 0.30;
+  ctx.fillStyle = '#021019';
+  ctx.beginPath();
+  ctx.ellipse(-2, 6, 42, 20, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  const hull = ctx.createLinearGradient(0, -14, 0, 14);
+  hull.addColorStop(0,    '#ffffff');
+  hull.addColorStop(0.42, '#e4eef6');
+  hull.addColorStop(1,    '#a8bccd');
+
+  ctx.beginPath();
+  ctx.moveTo(42, 0);
+  ctx.quadraticCurveTo(34, -11, 8, -14);
+  ctx.lineTo(-28, -12);
+  ctx.quadraticCurveTo(-34, 0, -28, 12);
+  ctx.lineTo(8, 14);
+  ctx.quadraticCurveTo(34, 11, 42, 0);
+  ctx.closePath();
+  ctx.fillStyle = hull;
+  ctx.fill();
+  ctx.strokeStyle = '#46627a';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(36, 1.5);
+  ctx.quadraticCurveTo(20, 11, -25, 9.5);
+  ctx.strokeStyle = 'rgba(214,64,64,0.85)';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(34, 0);
+  ctx.quadraticCurveTo(26, -8, 6, -10);
+  ctx.lineTo(-23, -8.5);
+  ctx.quadraticCurveTo(-27, 0, -23, 8.5);
+  ctx.lineTo(6, 10);
+  ctx.quadraticCurveTo(26, 8, 34, 0);
+  ctx.closePath();
+  ctx.fillStyle = '#c9a877';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(90,70,50,0.5)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(-13, -8.5, 23, 17, 5);
+  else ctx.rect(-13, -8.5, 23, 17);
+  ctx.fillStyle = '#e9eef2';
+  ctx.fill();
+  ctx.strokeStyle = '#7d93a5';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(7, -7);
+  ctx.lineTo(12, -3);
+  ctx.lineTo(12, 3);
+  ctx.lineTo(7, 7);
+  ctx.closePath();
+  ctx.fillStyle = '#7fd0f5';
+  ctx.fill();
+  ctx.strokeStyle = '#4a8fb5';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = '#2b4358';
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(-40, -6.5, 11, 13, 3);
+  else ctx.rect(-40, -6.5, 11, 13);
+  ctx.fill();
+  ctx.strokeStyle = '#152530';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(36, -2);
+  ctx.quadraticCurveTo(24, -8, 10, -10);
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1.6;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+/* ============================== ВИНЬЕТКА ============================== */
+function drawVignette() {
+  const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.78);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, 'rgba(0,10,20,0.55)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/* ============================== МИНИ-КАРТА ============================== */
+function drawMinimap() {
+  const size = window.matchMedia('(pointer: coarse)').matches ? 108 : 132;
+  const margin = window.matchMedia('(pointer: coarse)').matches ? 12 : 18;
+  const mx = W - size - margin;
+  const my = margin;
+  const cx = mx + size / 2;
+  const cy = my + size / 2;
+  const RANGE = 5000;
+  const scale = size / RANGE;
+
+  ctx.save();
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, size / 2, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(6,26,40,0.62)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(120,200,255,0.28)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, size / 2 - 1, 0, Math.PI * 2);
+  ctx.clip();
+
+  ctx.strokeStyle = 'rgba(120,200,255,0.10)';
+  ctx.lineWidth = 1;
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath(); ctx.moveTo(cx + i * size / 5, cy - size / 2); ctx.lineTo(cx + i * size / 5, cy + size / 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - size / 2, cy + i * size / 5); ctx.lineTo(cx + size / 2, cy + i * size / 5); ctx.stroke();
+  }
+
+  for (const isl of islands) {
+    const px = cx + (isl.x - boat.x) * scale;
+    const py = cy + (isl.y - boat.y) * scale;
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(2.5, isl.r * scale), 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(90,160,110,0.9)';
+    ctx.fill();
+  }
+
+  for (const c of chests) {
+    if (!c.active) continue;
+    const px = cx + (c.x - boat.x) * scale;
+    const py = cy + (c.y - boat.y) * scale;
+    ctx.beginPath();
+    ctx.arc(px, py, 2.4, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd45f';
+    ctx.fill();
+  }
+
+  for (const s of ships) {
+    const px = cx + (s.x - boat.x) * scale;
+    const py = cy + (s.y - boat.y) * scale;
+    ctx.beginPath();
+    ctx.arc(px, py, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(205,225,240,0.9)';
+    ctx.fill();
+  }
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(boat.angle);
+  ctx.beginPath();
+  ctx.moveTo(7, 0);
+  ctx.lineTo(-5, -4.5);
+  ctx.lineTo(-3, 0);
+  ctx.lineTo(-5, 4.5);
+  ctx.closePath();
+  ctx.fillStyle = '#5fd3ff';
+  ctx.fill();
+  ctx.restore();
+
+  ctx.restore();
+  ctx.restore();
+}
+
+/* ============================== HUD ============================== */
+const spdEl   = document.getElementById('spd');
+const crsEl   = document.getElementById('crs');
+const coinsEl = document.getElementById('coins');
+let hudTimer = 0;
+
+function bumpCoins() {
+  coinsEl.classList.add('bump');
+  setTimeout(() => coinsEl.classList.remove('bump'), 220);
+}
+
+function updateHUD(dt) {
+  hudTimer += dt;
+  if (hudTimer < 0.08) return;
+  hudTimer = 0;
+
+  spdEl.textContent = (boat.speed / 12).toFixed(1);
+  const course = (boat.angle * 180 / Math.PI + 90 + 3600) % 360;
+  crsEl.textContent = course.toFixed(0).padStart(3, '0');
+  coinsEl.textContent = coins;
+}
+
+/* ============================== ГЛАВНЫЙ ЦИКЛ ============================== */
+let lastTime = performance.now();
+
+function frame(now) {
+  let dt = (now - lastTime) / 1000;
+  lastTime = now;
+  if (dt > 0.05) dt = 0.05;
+  if (dt < 0) dt = 0;
+  elapsed += dt;
+
+  update(dt, elapsed);
+  emitWake(dt);
+  updateParticles(dt);
+  updateGoldParticles(dt);
+  updateFloatTexts(dt);
+  updateHUD(dt);
+
+  drawWater(elapsed);
+  drawIslands();
+  drawParticles();
+  for (const c of chests) drawChest(c, elapsed);
+  for (const s of ships) drawShip(s, elapsed);
+  drawGoldParticles();
+  drawBoat(elapsed);
+  drawFloatTexts();
+  drawVignette();
+  drawMinimap();
+
+  requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
