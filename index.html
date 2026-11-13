@@ -23,13 +23,17 @@
     background:rgba(6,26,40,.55); border:1px solid rgba(120,200,255,.25);
     padding:11px 15px; border-radius:14px; font-size:12px;
     backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
-    letter-spacing:.4px; pointer-events:none; min-width:170px;
+    letter-spacing:.4px; pointer-events:none; min-width:172px;
   }
   #hud .row { display:flex; justify-content:space-between; gap:18px; margin:3px 0; }
   #hud .lbl { color:#8fb4c9; }
   #hud .val { color:#5fd3ff; font-weight:700; font-variant-numeric:tabular-nums; }
   #coins { color:#ffd45f; display:inline-block; transition:transform .15s ease, text-shadow .15s ease; }
   #coins.bump { transform:scale(1.35); text-shadow:0 0 14px #ffd45f; }
+  #time { color:#8fe6b0; }
+  #time.warn { color:#ff6b6b; animation:pulse .8s infinite; }
+  #best { color:#ffd45f; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
   /* ---------- Подсказка для ПК ---------- */
   #help {
@@ -40,45 +44,34 @@
   }
 
   /* ---------- Сенсорное управление ---------- */
-  #touch {
-    position:fixed; inset:0; pointer-events:none; display:none; z-index:10;
-  }
+  #touch { position:fixed; inset:0; pointer-events:none; display:none; z-index:10; }
   @media (pointer:coarse) {
     #touch { display:block; }
     #help  { display:none; }
-    #hud   { font-size:11.5px; padding:9px 13px; min-width:150px; }
+    #hud   { font-size:11.5px; padding:9px 13px; min-width:158px; }
   }
 
   .pad {
     position:absolute;
     bottom:calc(18px + env(safe-area-inset-bottom, 0px));
-    display:flex;
-    gap:14px;
-    pointer-events:none;
+    display:flex; gap:14px; pointer-events:none;
   }
-  /* Слева: вперёд (сверху) / назад (снизу) */
   .pad-left {
     left:calc(18px + env(safe-area-inset-left, 0px));
-    flex-direction:column;
-    align-items:center;
+    flex-direction:column; align-items:center;
   }
-  /* Справа: влево / вправо (в ряд) */
   .pad-right {
     right:calc(18px + env(safe-area-inset-right, 0px));
-    flex-direction:row;
-    align-items:center;
+    flex-direction:row; align-items:center;
   }
 
   .tbtn {
-    width:78px; height:78px;
-    border-radius:50%;
+    width:78px; height:78px; border-radius:50%;
     border:2px solid rgba(120,200,255,.38);
     background:rgba(10,40,60,.58);
-    color:#bfe9ff;
-    font-size:28px; line-height:1;
+    color:#bfe9ff; font-size:28px; line-height:1;
     display:flex; align-items:center; justify-content:center;
-    pointer-events:auto;
-    touch-action:none;
+    pointer-events:auto; touch-action:none;
     -webkit-tap-highlight-color:transparent;
     user-select:none; -webkit-user-select:none;
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
@@ -90,33 +83,109 @@
     border-color:rgba(180,235,255,.85);
     transform:scale(.93);
   }
-  /* Чуть увеличиваем кнопки на очень больших экранах */
   @media (min-width:820px) and (pointer:coarse) {
     .tbtn { width:88px; height:88px; font-size:32px; }
   }
+
+  /* ---------- Экран окончания раунда ---------- */
+  #overlay {
+    position:fixed; inset:0; z-index:100;
+    display:flex; align-items:center; justify-content:center;
+    background:rgba(3,12,20,.72);
+    backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+    padding:18px;
+    opacity:0; visibility:hidden; pointer-events:none;
+    transition:opacity .25s ease, visibility .25s ease;
+  }
+  #overlay.show { opacity:1; visibility:visible; pointer-events:auto; }
+
+  .card {
+    width:100%; max-width:400px; max-height:88vh; overflow-y:auto;
+    background:rgba(10,32,48,0.95);
+    border:1px solid rgba(120,200,255,0.30);
+    border-radius:20px; padding:24px 22px;
+    color:#e8f6ff; text-align:center;
+    box-shadow:0 20px 60px rgba(0,0,0,0.55);
+    -webkit-overflow-scrolling:touch;
+  }
+  .card h2 {
+    font-size:14px; font-weight:600; color:#9fc4d8;
+    letter-spacing:2px; text-transform:uppercase; margin-bottom:16px;
+  }
+  .big {
+    font-size:54px; font-weight:800; color:#ffd45f; line-height:1;
+    text-shadow:0 0 30px rgba(255,212,95,0.45);
+    font-variant-numeric:tabular-nums;
+  }
+  .big small { font-size:15px; font-weight:500; color:#d8c48a; letter-spacing:1px; }
+  .sub { margin-top:10px; font-size:12.5px; color:#8fb4c9; }
+  .log-title {
+    margin-top:22px; font-size:11px; text-transform:uppercase;
+    letter-spacing:1.3px; color:#7fa6bd; text-align:left;
+  }
+  .log {
+    list-style:none; margin-top:8px; max-height:190px;
+    overflow-y:auto; text-align:left; border-radius:10px;
+  }
+  .log li {
+    display:flex; justify-content:space-between;
+    padding:7px 10px; font-size:13px; color:#cfe6f4;
+    border-bottom:1px solid rgba(120,200,255,0.08);
+  }
+  .log li:last-child { border-bottom:none; }
+  .log li.best {
+    color:#ffd45f; font-weight:700;
+    background:rgba(255,212,95,0.08); border-radius:8px;
+  }
+  .log:empty::after {
+    content:"Пока нет попыток"; display:block;
+    padding:10px; font-size:12.5px; color:#6d8ea3; font-style:italic;
+  }
+  #restartBtn {
+    margin-top:20px; width:100%; padding:15px;
+    border:none; border-radius:13px;
+    background:linear-gradient(180deg, #3fb0ea, #1f7ab0);
+    color:#fff; font-size:16px; font-weight:700; letter-spacing:.5px;
+    cursor:pointer; touch-action:manipulation;
+    box-shadow:0 6px 20px rgba(31,122,176,0.5);
+    transition:transform .08s, filter .08s;
+  }
+  #restartBtn:active { transform:scale(.97); filter:brightness(1.15); }
+  .hint { margin-top:12px; font-size:11px; color:#6d8ea3; letter-spacing:.3px; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 
 <div id="hud">
+  <div class="row"><span class="lbl">Время</span><span class="val" id="time">1:00</span></div>
   <div class="row"><span class="lbl">Скорость</span><span><span class="val" id="spd">0.0</span> <span class="lbl">уз</span></span></div>
-  <div class="row"><span class="lbl">Курс</span><span><span class="val" id="crs">0</span><span class="lbl">°</span></span></div>
   <div class="row"><span class="lbl">Монеты</span><span class="val" id="coins">0</span></div>
+  <div class="row"><span class="lbl">Рекорд</span><span class="val" id="best">0</span></div>
 </div>
 
 <div id="help">W / ↑ — вперёд &nbsp;·&nbsp; S / ↓ — назад &nbsp;·&nbsp; A / D — руль</div>
 
 <div id="touch">
-  <!-- Слева: вперёд / назад -->
   <div class="pad pad-left">
     <button class="tbtn" data-k="fwd"  aria-label="Вперёд">▲</button>
     <button class="tbtn" data-k="back" aria-label="Назад">▼</button>
   </div>
-  <!-- Справа: влево / вправо -->
   <div class="pad pad-right">
     <button class="tbtn" data-k="left"  aria-label="Влево">◀</button>
     <button class="tbtn" data-k="right" aria-label="Вправо">▶</button>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="card">
+    <h2>⏱ Раунд окончен</h2>
+    <div class="big"><span id="finalCoins">0</span> <small>монет</small></div>
+    <div class="sub" id="finalSub"></div>
+    <div class="log-title">Попытки в этой сессии</div>
+    <ol class="log" id="logList"></ol>
+    <button id="restartBtn">Играть снова</button>
+    <div class="hint">Пробел или Enter — сыграть ещё</div>
   </div>
 </div>
 
@@ -153,12 +222,12 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 
-/* --- Сенсорные кнопки: мультитач, надёжное нажатие --- */
 document.querySelectorAll('.tbtn').forEach(btn => {
   const k = btn.dataset.k;
 
   const press = e => {
     e.preventDefault();
+    if (gameState !== 'playing') return;
     touch[k] = true;
     btn.classList.add('active');
     try { btn.setPointerCapture(e.pointerId); } catch (_) {}
@@ -189,6 +258,13 @@ const floatTexts    = [];
 let wakeAcc = 0;
 let coins = 0;
 let elapsed = 0;
+
+/* --- Раунд и сессия --- */
+const ROUND_TIME = 60;              // длительность раунда, сек
+let gameState = 'playing';          // 'playing' | 'over'
+let timeLeft  = ROUND_TIME;
+const sessionLog = [];              // [{ coins }]
+let bestScore = 0;
 
 const THRUST  = 420;
 const REVERSE = 210;
@@ -280,41 +356,68 @@ for (let i = 0; i < 700 && ships.length < 20; i++) {
 
 /* ============================== СУНДУКИ ============================== */
 const chests = [];
-const CHEST_COUNT = 22;
+const CHEST_COUNT = 22;              // постоянное число сундуков на поле
 
+function chestSpotOk(x, y, self) {
+  for (const isl of islands) {
+    if (Math.hypot(isl.x - x, isl.y - y) < isl.r * 0.9 + 130) return false;
+  }
+  for (const s of ships) {
+    if (Math.hypot(s.baseX - x, s.baseY - y) < 190) return false;
+  }
+  for (const c of chests) {
+    if (c !== self && c.active && Math.hypot(c.x - x, c.y - y) < 320) return false;
+  }
+  return true;
+}
+
+/* Размещение по всему миру (для старта раунда) */
 function placeChest(chest) {
-  for (let tries = 0; tries < 260; tries++) {
+  for (let tries = 0; tries < 300; tries++) {
     const a = Math.random() * Math.PI * 2;
     const d = 350 + Math.pow(Math.random(), 0.75) * (WORLD_RADIUS - 350);
-    const x = Math.cos(a) * d;
-    const y = Math.sin(a) * d;
-
+    const x = Math.cos(a) * d, y = Math.sin(a) * d;
+    if (chestSpotOk(x, y, chest)) { chest.x = x; chest.y = y; chest.active = true; return; }
+  }
+  // Ослабленные условия — на случай очень плотного мира
+  for (let tries = 0; tries < 300; tries++) {
+    const a = Math.random() * Math.PI * 2;
+    const d = 350 + Math.pow(Math.random(), 0.75) * (WORLD_RADIUS - 350);
+    const x = Math.cos(a) * d, y = Math.sin(a) * d;
     let ok = true;
     for (const isl of islands) {
-      if (Math.hypot(isl.x - x, isl.y - y) < isl.r * 0.9 + 130) { ok = false; break; }
-    }
-    if (ok) for (const s of ships) {
-      if (Math.hypot(s.baseX - x, s.baseY - y) < 190) { ok = false; break; }
-    }
-    if (ok) {
-      for (const c of chests) {
-        if (c !== chest && c.active && Math.hypot(c.x - x, c.y - y) < 320) { ok = false; break; }
-      }
+      if (Math.hypot(isl.x - x, isl.y - y) < isl.r * 0.85 + 60) { ok = false; break; }
     }
     if (ok) { chest.x = x; chest.y = y; chest.active = true; return; }
   }
-  chest.x = 0; chest.y = 0; chest.active = true;
+  chest.x = (Math.random() - 0.5) * 3000;
+  chest.y = (Math.random() - 0.5) * 3000;
+  chest.active = true;
+}
+
+/* Перерождение рядом с игроком — в радиусе ~5 секунд хода */
+function respawnChestNearPlayer(chest) {
+  const bx = boat.x, by = boat.y;
+  for (let tries = 0; tries < 500; tries++) {
+    const a = Math.random() * Math.PI * 2;
+    const d = 800 + Math.random() * 1400;   // 800..2200 единиц от игрока
+    const x = bx + Math.cos(a) * d;
+    const y = by + Math.sin(a) * d;
+    if (chestSpotOk(x, y, chest)) { chest.x = x; chest.y = y; chest.active = true; return; }
+  }
+  placeChest(chest);   // запасной вариант
 }
 
 for (let i = 0; i < CHEST_COUNT; i++) {
-  const c = { x: 0, y: 0, active: false, respawnAt: 0, phase: Math.random() * 6.28 };
+  const c = { x: 0, y: 0, active: false, phase: Math.random() * 6.28 };
   placeChest(c);
   chests.push(c);
 }
 
 /* ============================== ЧАСТИЦЫ ============================== */
 function spawnCoinBurst(x, y, gain) {
-  for (let i = 0; i < 28; i++) {
+  const n = Math.min(52, 14 + Math.round(gain * 1.8));
+  for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2;
     const sp = 60 + Math.random() * 230;
     goldParticles.push({
@@ -369,6 +472,7 @@ function update(dt, t) {
   boat.y += boat.vy * dt;
   boat.speed = Math.hypot(boat.vx, boat.vy);
 
+  /* Корабли */
   for (const s of ships) {
     s.phase += s.speed * dt;
     s.x = s.baseX + Math.cos(s.phase) * s.driftR;
@@ -416,29 +520,39 @@ function update(dt, t) {
     }
   }
 
-  /* Сундуки */
+  /* Сундуки: сбор + мгновенное перерождение рядом */
   for (const c of chests) {
-    if (!c.active) {
-      if (t >= c.respawnAt) placeChest(c);
-      continue;
-    }
+    if (!c.active) continue;
     const dx = boat.x - c.x;
     const dy = boat.y - c.y;
     if (dx * dx + dy * dy < 56 * 56) {
       c.active = false;
-      c.respawnAt = t + 16 + Math.random() * 14;
-      const gain = 5 + Math.floor(Math.random() * 21);
+
+      // Очки зависят от скорости: чем быстрее подобрал — тем больше монет
+      const base = 3 + Math.floor(Math.random() * 6);        // 3..8
+      const mult = 0.35 + boat.speed / 110;                  // ~0.35 на месте, ~4.5 на полном ходу
+      const gain = Math.max(1, Math.round(base * mult));
+
       coins += gain;
       spawnCoinBurst(c.x, c.y, gain);
       bumpCoins();
+      respawnChestNearPlayer(c);
     }
   }
 
+  /* Камера */
   const tx = boat.x + boat.vx * 0.28;
   const ty = boat.y + boat.vy * 0.28;
   const k  = 1 - Math.exp(-3.5 * dt);
   cam.x += (tx - cam.x) * k;
   cam.y += (ty - cam.y) * k;
+
+  /* Таймер раунда */
+  timeLeft -= dt;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    endRound();
+  }
 }
 
 /* ============================== СЛЕД ============================== */
@@ -1019,8 +1133,9 @@ function drawVignette() {
 
 /* ============================== МИНИ-КАРТА ============================== */
 function drawMinimap() {
-  const size = window.matchMedia('(pointer: coarse)').matches ? 108 : 132;
-  const margin = window.matchMedia('(pointer: coarse)').matches ? 12 : 18;
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  const size = coarse ? 108 : 132;
+  const margin = coarse ? 12 : 18;
   const mx = W - size - margin;
   const my = margin;
   const cx = mx + size / 2;
@@ -1097,13 +1212,21 @@ function drawMinimap() {
 
 /* ============================== HUD ============================== */
 const spdEl   = document.getElementById('spd');
-const crsEl   = document.getElementById('crs');
 const coinsEl = document.getElementById('coins');
+const timeEl  = document.getElementById('time');
+const bestEl  = document.getElementById('best');
 let hudTimer = 0;
 
 function bumpCoins() {
   coinsEl.classList.add('bump');
   setTimeout(() => coinsEl.classList.remove('bump'), 220);
+}
+
+function fmtTime(s) {
+  const t = Math.max(0, Math.ceil(s));
+  const m = Math.floor(t / 60);
+  const ss = t % 60;
+  return m + ':' + (ss < 10 ? '0' : '') + ss;
 }
 
 function updateHUD(dt) {
@@ -1112,10 +1235,96 @@ function updateHUD(dt) {
   hudTimer = 0;
 
   spdEl.textContent = (boat.speed / 12).toFixed(1);
-  const course = (boat.angle * 180 / Math.PI + 90 + 3600) % 360;
-  crsEl.textContent = course.toFixed(0).padStart(3, '0');
   coinsEl.textContent = coins;
+  timeEl.textContent = fmtTime(timeLeft);
+  timeEl.classList.toggle('warn', timeLeft <= 10);
 }
+
+/* ============================== РАУНД ============================== */
+const overlay = document.getElementById('overlay');
+const logList = document.getElementById('logList');
+const restartBtn = document.getElementById('restartBtn');
+
+function endRound() {
+  if (gameState !== 'playing') return;
+  gameState = 'over';
+
+  sessionLog.push({ coins });
+  if (coins > bestScore) bestScore = coins;
+  bestEl.textContent = bestScore;
+
+  timeEl.textContent = '0:00';
+  timeEl.classList.remove('warn');
+
+  // Сбрасываем сенсорное управление
+  for (const k in touch) touch[k] = false;
+  document.querySelectorAll('.tbtn.active').forEach(b => b.classList.remove('active'));
+
+  showOverlay();
+}
+
+function showOverlay() {
+  document.getElementById('finalCoins').textContent = coins;
+
+  const total = sessionLog.reduce((s, r) => s + r.coins, 0);
+  document.getElementById('finalSub').textContent =
+    'Попытка ' + sessionLog.length + ' · всего за сессию: ' + total + ' монет';
+
+  logList.innerHTML = '';
+  sessionLog.forEach((r, i) => {
+    const li = document.createElement('li');
+    if (r.coins === bestScore) li.classList.add('best');
+    li.innerHTML = '<span>Попытка ' + (i + 1) +
+      (r.coins === bestScore ? ' ★' : '') + '</span><span>' + r.coins + ' монет</span>';
+    logList.appendChild(li);
+  });
+  logList.scrollTop = logList.scrollHeight;
+
+  overlay.classList.add('show');
+}
+
+function startRound() {
+  overlay.classList.remove('show');
+  gameState = 'playing';
+  timeLeft = ROUND_TIME;
+  coins = 0;
+
+  // Сброс лодки
+  boat.x = 0; boat.y = 0;
+  boat.vx = 0; boat.vy = 0;
+  boat.av = 0; boat.angle = 0; boat.speed = 0;
+  cam.x = 0; cam.y = 0;
+
+  // Очистка эффектов
+  particles.length = 0;
+  goldParticles.length = 0;
+  floatTexts.length = 0;
+  wakeAcc = 0;
+
+  // Перестановка сундуков (всегда CHEST_COUNT штук на поле)
+  for (const c of chests) {
+    c.active = false;
+    placeChest(c);
+  }
+
+  // Сенсор
+  for (const k in touch) touch[k] = false;
+  document.querySelectorAll('.tbtn.active').forEach(b => b.classList.remove('active'));
+
+  coinsEl.textContent = '0';
+  timeEl.textContent = fmtTime(ROUND_TIME);
+  timeEl.classList.remove('warn');
+
+  lastTime = performance.now();
+}
+
+restartBtn.addEventListener('click', startRound);
+window.addEventListener('keydown', e => {
+  if (gameState === 'over' && (e.code === 'Enter' || e.code === 'Space')) {
+    e.preventDefault();
+    startRound();
+  }
+});
 
 /* ============================== ГЛАВНЫЙ ЦИКЛ ============================== */
 let lastTime = performance.now();
@@ -1127,12 +1336,14 @@ function frame(now) {
   if (dt < 0) dt = 0;
   elapsed += dt;
 
-  update(dt, elapsed);
-  emitWake(dt);
-  updateParticles(dt);
-  updateGoldParticles(dt);
-  updateFloatTexts(dt);
-  updateHUD(dt);
+  if (gameState === 'playing') {
+    update(dt, elapsed);
+    emitWake(dt);
+    updateParticles(dt);
+    updateGoldParticles(dt);
+    updateFloatTexts(dt);
+    updateHUD(dt);
+  }
 
   drawWater(elapsed);
   drawIslands();
